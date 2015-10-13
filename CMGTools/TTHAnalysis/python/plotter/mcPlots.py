@@ -645,10 +645,10 @@ class PlotMaker:
                 doRatio = self._options.showRatio and ('data' in pmap or (self._options.plotmode != "stack" and len(pmap) == 4)) and ("TH2" not in total.ClassName())
                 islog = pspec.hasOption('Logy'); 
                 # define aspect ratio
-                if doRatio: ROOT.gStyle.SetPaperSize(20.,25.)
-                else:       ROOT.gStyle.SetPaperSize(20.,20.)
+                if doRatio: ROOT.gStyle.SetPaperSize(20.*options.zoomPlot,25.*options.zoomPlot)
+                else:       ROOT.gStyle.SetPaperSize(20.*options.zoomPlot,20.*options.zoomPlot)
                 # create canvas
-                c1 = ROOT.TCanvas(pspec.name+"_canvas", pspec.name, 600, (750 if doRatio else 600))
+                c1 = ROOT.TCanvas(pspec.name+"_canvas", pspec.name, int(600*options.zoomPlot), int((750 if doRatio else 600)*options.zoomPlot))
                 c1.SetTopMargin(c1.GetTopMargin()*options.topSpamSize);
                 c1.Draw()
                 p1, p2 = c1, None # high and low panes
@@ -794,6 +794,7 @@ def addPlotMakerOptions(parser):
     parser.add_option("--lspam", dest="lspam",   type="string", default="CMS Preliminary", help="Spam text on the right hand side");
     parser.add_option("--rspam", dest="rspam",   type="string", default="#sqrt{s} = 13 TeV, L = %(lumi)", help="Spam text on the right hand side");
     parser.add_option("--topSpamSize", dest="topSpamSize",   type="float", default=1.0, help="Zoom factor for the top spam");
+    parser.add_option("--zoom", dest="zoomPlot",   type="float", default=1.0, help="Zoom factor for plot as whole");
     parser.add_option("--print", dest="printPlots", type="string", default="png,pdf,txt", help="print out plots in this format or formats (e.g. 'png,pdf,txt')");
     parser.add_option("--pdir", "--print-dir", dest="printDir", type="string", default="plots", help="print out plots in this directory");
     parser.add_option("--showSigShape", dest="showSigShape", action="store_true", default=False, help="Superimpose a normalized signal shape")
