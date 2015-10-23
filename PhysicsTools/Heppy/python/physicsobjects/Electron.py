@@ -33,6 +33,7 @@ class Electron( Lepton ):
         elif id == "POG_MVA_ID_Run2_NonTrig_Loose":    return self.mvaIDRun2("NonTrigPhys14","Loose")
         elif id == "POG_MVA_ID_Run2_NonTrig_Tight":    return self.mvaIDRun2("NonTrigPhys14","Tight")
         elif id == "MVA_ID_NonTrig_Phys14Fix_HZZ":     return self.mvaIDRun2("NonTrigPhys14Fix","HZZ")
+        elif id == "MVA_ID_NonTrig_Spring15_HZZ":     return self.mvaIDRun2("NonTrigSpring15","HZZ")
         elif id.startswith("POG_Cuts_ID_"):
                 return self.cutBasedId(id.replace("POG_Cuts_ID_","POG_"))
         for ID in self.electronIDs():
@@ -198,11 +199,17 @@ class Electron( Lepton ):
 
     def mvaRun2( self, name, debug = False ):
         if name not in self._mvaRun2:
+            if name == "NonTrigSpring15MiniAOD" and self.physObj.hasUserFloat("ElectronMVAEstimatorRun2Spring15NonTrig25nsV1Values"):
+                self._mvaRun2[name] =  self.physObj.userFloat("ElectronMVAEstimatorRun2Spring15NonTrig25nsV1Values")
+                return self._mvaRun2[name]
             if name not in ElectronMVAID_ByName: raise RuntimeError, "Unknown electron run2 mva id %s (known ones are: %s)\n" % (name, ElectronMVAID_ByName.keys())
             if self.associatedVertex == None: raise RuntimeError, "You need to set electron.associatedVertex before calling any MVA"
             if self.rho              == None: raise RuntimeError, "You need to set electron.rho before calling any MVA"
             if self.event            == None: raise RuntimeError, "You need to set electron.event before calling any MVA"
             self._mvaRun2[name] = ElectronMVAID_ByName[name](self.physObj, self.associatedVertex, self.event, self.rho, True, debug)
+            #if name == "NonTrigSpring15" and self.physObj.hasUserFloat("ElectronMVAEstimatorRun2Spring15NonTrig25nsV1Values"):
+            #    if self._mvaRun2[name] != self.physObj.userFloat("ElectronMVAEstimatorRun2Spring15NonTrig25nsV1Values"):
+            #        print "ERROR: Mismatch in Electron MVA %s: %.8f vs %.8f for pt %.3f, eta %.3f" % (name, self._mvaRun2[name], self.physObj.userFloat("ElectronMVAEstimatorRun2Spring15NonTrig25nsV1Values"), self.pt(), self.eta() )
         return self._mvaRun2[name]
 
     def mvaIDTight(self, full5x5=False):
@@ -253,6 +260,16 @@ class Electron( Lepton ):
                         if   eta < 0.8  : return self.mvaRun2(name) > -0.652;
                         elif eta < 1.479: return self.mvaRun2(name) > -0.701;
                         else            : return self.mvaRun2(name) > -0.350;
+            elif name in ("NonTrigSpring15","NonTrigSpring15MiniAOD"):
+                if wp == "HZZ":
+                    if self.pt() <= 10:
+                        if   eta < 0.8  : return self.mvaRun2(name) > -0.265;
+                        elif eta < 1.479: return self.mvaRun2(name) > -0.556;
+                        else            : return self.mvaRun2(name) > -0.551;
+                    else:
+                        if   eta < 0.8  : return self.mvaRun2(name) > -0.072;
+                        elif eta < 1.479: return self.mvaRun2(name) > -0.286;
+                        else            : return self.mvaRun2(name) > -0.267;
             else: raise RuntimeError, "Ele MVA ID type not found"
 
 
