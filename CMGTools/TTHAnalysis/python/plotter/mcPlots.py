@@ -17,6 +17,7 @@ class PlotFile:
     def __init__(self,fileName,options):
         self._options = options
         self._plots = []
+        defaults = {}
         infile = open(fileName,'r')
         for line in infile:
             if re.match("\s*#.*", line) or len(line.strip())==0: continue
@@ -33,6 +34,16 @@ class PlotFile:
                     else: extra[setting] = True
             line = re.sub("#.*","",line) 
             field = [f.strip().replace(";",":") for f in line.replace("::",";;").replace("\\:",";").split(':')]
+            if len(field) == 1 and field[0] == "*":
+                if len(self._plots): raise RuntimeError, "PlotFile defaults ('*') can be specified only before all plots"
+                print "Setting the following defaults for all plots: "
+                for k,v in extra.iteritems():
+                    print "\t%s: %r" % (k,v)
+                    defaults[k] = v
+                continue
+            else:
+                for k,v in defaults.iteritems():
+                    if k not in extra: extra[k] = v
             if len(field) <= 2: continue
             if len(options.plotselect):
                 skipMe = True
