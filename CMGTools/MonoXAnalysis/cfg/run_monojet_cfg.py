@@ -3,12 +3,25 @@
 ## skim condition:   MET > 200 GeV                      ##
 ##########################################################
 import PhysicsTools.HeppyCore.framework.config as cfg
+import re
 
-#Load all analyzers
+# Load all analyzers
 from CMGTools.MonoXAnalysis.analyzers.dmCore_modules_cff import * 
-from PhysicsTools.Heppy.analyzers.objects.METAnalyzer import *
+from PhysicsTools.HeppyCore.framework.heppy_loop import getHeppyOption
 
-# Redefine what I need
+#-------- SET OPTIONS AND REDEFINE CONFIGURATIONS -----------
+
+is50ns = getHeppyOption("is50ns",False)
+runData = getHeppyOption("runData",True)
+scaleProdToLumi = float(getHeppyOption("scaleProdToLumi",-1)) # produce rough equivalent of X /pb for MC datasets
+saveSuperClusterVariables = getHeppyOption("saveSuperClusterVariables",True)
+removeJetReCalibration = getHeppyOption("removeJetReCalibration",False)
+doT1METCorr = getHeppyOption("doT1METCorr",True)
+forcedSplitFactor = getHeppyOption("splitFactor",-1)
+forcedFineSplitFactor = getHeppyOption("fineSplitFactor",-1)
+isTest = getHeppyOption("test",None) != None and not re.match("^\d+$",getHeppyOption("test"))
+
+# Define skims
 signalSkim = False
 diLepSkim = True
 singleLepSkim = False
@@ -86,7 +99,6 @@ MonoJetEventAna = cfg.Analyzer(
 from CMGTools.MonoXAnalysis.analyzers.treeProducerDarkMatterMonoJet import * 
 
 # for electron scale and resolution checks
-saveSuperClusterVariables=True
 if saveSuperClusterVariables:
     leptonTypeExtra.addVariables([
             NTupleVariable("e5x5", lambda x: x.e5x5() if (abs(x.pdgId())==11 and hasattr(x,"e5x5")) else -999, help="Electron e5x5"),
@@ -138,12 +150,20 @@ treeProducer.globalVariables.append(NTupleVariable("hbheFilterNew50ns", lambda e
 treeProducer.globalVariables.append(NTupleVariable("hbheFilterNew25ns", lambda ev: ev.hbheFilterNew25ns, int, help="new HBHE filter for 25 ns"))
 treeProducer.globalVariables.append(NTupleVariable("hbheFilterIso", lambda ev: ev.hbheFilterIso, int, help="HBHE iso-based noise filter"))
 
+#additional MET quantities
+metAna.doTkMet = True
+treeProducer.globalVariables.append(NTupleVariable("met_trkPt", lambda ev : ev.tkMet.pt() if  hasattr(ev,'tkMet') else  0, help="tkmet p_{T}"))
+treeProducer.globalVariables.append(NTupleVariable("met_trkPhi", lambda ev : ev.tkMet.phi() if  hasattr(ev,'tkMet') else  0, help="tkmet phi"))
+if doT1METCorr:
+    jetAna.calculateType1METCorrection = True
+    metAna.recalibrate = "type1"
+    metAna.old74XMiniAODs = False
 
 
 #-------- SEQUENCE
 sequence = cfg.Sequence(dmCoreSequence+[
-   monoXRazorAna,
-   monoXMT2Ana,
+#   monoXRazorAna,
+#   monoXMT2Ana,
    ttHFatJetAna,
    monoJetVarAna,
    MonoJetEventAna,
@@ -168,33 +188,43 @@ triggerFlagsAna.triggerBits = {
     'DoubleMuEl' : triggers_2mu1e,
     'DoubleElMu' : triggers_2e1mu,
     'SingleMu' : triggers_1mu_iso,
-    'SingleMu50ns' : triggers_1mu_iso_50ns,
     'SingleEl'     : triggers_1e,
-    'SingleEl50ns' : triggers_1e_50ns,
-    'SingleMu_8TeV' : triggers_1mu_8TeV + triggers_1mu_iso_r,
-    'DoubleMu_8TeV' : triggers_mumu_8TeV + triggers_mumu_run1,
-    'MuEG_8TeV'     : triggers_mue_8TeV + triggers_mue_run1,
-    'DoubleEl_8TeV' : triggers_ee_8TeV + triggers_ee_run1,
     'MonoJet80MET90' : triggers_Jet80MET90,
     'MonoJet80MET120' : triggers_Jet80MET120,
     'METMu5' : triggers_MET120Mu5,
 }
+triggerFlagsAna.unrollbits = True
+triggerFlagsAna.saveIsUnprescaled = True
+triggerFlagsAna.checkL1Prescale = True
 
 from CMGTools.MonoXAnalysis.samples.samples_monojet_13TeV_74X import *
+from CMGTools.RootTools.samples.samples_13TeV_DATA2015 import *
 
-selectedComponents = []; is50ns = False
+selectedComponents = [];
 
-isData = False
+if scaleProdToLumi>0: # select only a subset of a sample, corresponding to a given luminosity (assuming ~30k events per MiniAOD file, which is ok for central production)
+    target_lumi = scaleProdToLumi # in inverse picobarns
+    for c in selectedComponents:
+        if not c.isMC: continue
+        nfiles = int(min(ceil(target_lumi * c.xSection / 30e3), len(c.files)))
+        #if nfiles < 50: nfiles = min(4*nfiles, len(c.files))
+        print "For component %s, will want %d/%d files; AAA %s" % (c.name, nfiles, len(c.files), "eoscms" not in c.files[0])
+        c.files = c.files[:nfiles]
+        c.splitFactor = len(c.files)
+        c.fineSplitFactor = 1
 
-if isData==True: # For running on data
-    # Run2015C (Golden) + Run2015D (DCS) up to run 256941 , 25 ns, 3.8T     
-    json = "/afs/cern.ch/cms/CAF/CMSCOMM/COMM_DQM/certification/Collisions15/13TeV/Cert_246908-257599_13TeV_PromptReco_Collisions15_25ns_JSON.txt"
-    processing = "Run2015D-PromptReco-v3"; short = "Run2015D_v3"; run_ranges = [ (246908,257599) ]; useAAA=False; is50ns=False
+if runData and not isTest: # For running on data
+    json = "/afs/cern.ch/cms/CAF/CMSCOMM/COMM_DQM/certification/Collisions15/13TeV/Cert_246908-258750_13TeV_PromptReco_Collisions15_25ns_JSON.txt"
+    run_ranges = [ (246908,258750) ]; useAAA=False; is50ns=False
 
     compSelection = ""
     DatasetsAndTriggers = []
     selectedComponents = []; vetos = []
-
+    ProcessingsAndRunRanges = []; Shorts = []
+    ProcessingsAndRunRanges.append( ("Run2015C_25ns-05Oct2015-v1", [254227,255031] ) ); Shorts.append("Run2015C_05Oct")
+    ProcessingsAndRunRanges.append( ("Run2015D-05Oct2015-v1", [256630,258158] ) ); Shorts.append("Run2015D_05Oct")
+    ProcessingsAndRunRanges.append( ("Run2015D-PromptReco-v4", [258159,999999] ) ); Shorts.append("Run2015D_v4")
+    
     if diLepSkim == True:
         DatasetsAndTriggers.append( ("DoubleMuon", triggers_mumu_iso + triggers_mumu_ss + triggers_mumu_ht + triggers_3mu + triggers_3mu_alt) )
         DatasetsAndTriggers.append( ("DoubleEG",   triggers_ee + triggers_ee_ht + triggers_3e) )
@@ -205,56 +235,79 @@ if isData==True: # For running on data
         DatasetsAndTriggers.append( ("MET", triggers_Jet80MET90 + triggers_Jet80MET120 + triggers_MET120Mu5 ) )
 
     for pd,triggers in DatasetsAndTriggers:
-        for run_range in run_ranges:
-            label = "runs_%d_%d" % run_range if run_range[0] != run_range[1] else "run_%d" % (run_range[0],)
-            compname = pd+"_"+short+"_"+label
-            if ((compSelection and not re.search(compSelection, compname))):
+        iproc=0 
+        for processing,run_dslimits in ProcessingsAndRunRanges:
+            for run_range in run_ranges:
+                run_min = max(run_range[0],run_dslimits[0])
+                run_max = min(run_range[1],run_dslimits[1])
+                this_run_range = (run_min,run_max)
+                label = "runs_%d_%d" % this_run_range if this_run_range[0] != this_run_range[1] else "run_%d" % (this_run_range[0],)
+                compname = pd+"_"+Shorts[iproc]+"_"+label
+                if ((compSelection and not re.search(compSelection, compname))):
                     print "Will skip %s" % (compname)
+
                     continue
-            comp = kreator.makeDataComponent(compname, 
-                                             "/"+pd+"/"+processing+"/MINIAOD", 
-                                             "CMS", ".*root", 
-                                             json=json, 
-                                             run_range=run_range, 
-                                             triggers=triggers[:], vetoTriggers = vetos[:],
-                                             useAAA=useAAA)
-            print "Will process %s (%d files)" % (comp.name, len(comp.files))
-#            print "\ttrigger sel %s, veto %s" % (triggers, vetos)
-            comp.splitFactor = len(comp.files)
-            comp.fineSplitFactor = 1
-            selectedComponents.append( comp )
+                print "Building component ",compname," with run range ",label, "\n"
+                comp = kreator.makeDataComponent(compname, 
+                                                 "/"+pd+"/"+processing+"/MINIAOD", 
+                                                 "CMS", ".*root", 
+                                                 json=json, 
+                                                 run_range=this_run_range, 
+                                                 #triggers=triggers[:], vetoTriggers = vetos[:],
+                                                 useAAA=useAAA)
+                print "Will process %s (%d files)" % (comp.name, len(comp.files))
+                print "\ttrigger sel %s, veto %s" % (triggers, vetos)
+                comp.splitFactor = len(comp.files)/4
+                comp.fineSplitFactor = 1
+                selectedComponents.append( comp )
+            iproc += 1
         vetos += triggers
     if json is None:
         dmCoreSequence.remove(jsonAna)
 
+if is50ns:
+    jetAna.mcGT     = "Summer15_50nsV5_MC"
+    jetAna.dataGT   = "Summer15_50nsV5_DATA"
+    pfChargedCHSjetAna.mcGT     = "Summer15_50nsV5_MC"
+    pfChargedCHSjetAna.dataGT   = "Summer15_50nsV5_DATA"
 
+if removeJetReCalibration:
+    ## NOTE: jets will still be recalibrated, since calculateSeparateCorrections is True,
+    ##       however the code will check that the output 4-vector is unchanged.
+    jetAna.recalibrateJets = False
 
-if isData==False: # MC all
-### 25 ns 74X MC samples
-#selectedComponents = mcSamples_monojet_Asymptotic25ns ; is50ns = False
+if forcedSplitFactor>0 or forcedFineSplitFactor>0:
+    if forcedFineSplitFactor>0 and forcedSplitFactor!=1: raise RuntimeError, 'splitFactor must be 1 if setting fineSplitFactor'
+    for c in selectedComponents:
+        if forcedSplitFactor>0: c.splitFactor = forcedSplitFactor
+        if forcedFineSplitFactor>0: c.fineSplitFactor = forcedFineSplitFactor
+
+if runData==False and not isTest: # MC all
+    ### 25 ns 74X MC samples
+    is50ns = False
+    mcSamples = mcSamples_monojet_Asymptotic25ns
+    if signalSkim:
+        mcSamples += mcSamples_monojet_Asymptotic25ns_signals
+    selectedComponents = mcSamples 
+
 ### 50 ns 74X MC samples
 #selectedComponents = mcSamples_monojet_Asymptotic50ns ; is50ns = True
     for comp in selectedComponents:
-        comp.splitFactor = 100
+        comp.splitFactor = len(comp.files)/4
         comp.fineSplitFactor = 1
 
 
 
 #-------- HOW TO RUN ----------- 
-from PhysicsTools.HeppyCore.framework.heppy_loop import getHeppyOption
 test = getHeppyOption('test')
-if test == '1':
+if test == 'DYJets':
     monoJetSkim.metCut = 0
+    monoJetCtrlLepSkim.minLeptons = 2
     comp = DYJetsToLL_M50_HT100to200
     comp.files = comp.files[:1]
     comp.splitFactor = 1
     comp.fineSplitFactor = 1
     selectedComponents = [ comp ]
-elif test == '2':
-    for comp in selectedComponents:
-        comp.files = comp.files[:1]
-        comp.splitFactor = 1
-        comp.fineSplitFactor = 1
 elif test == 'EOS':
     comp = DYJetsToLL_M50
     comp.files = comp.files[:1]
@@ -278,112 +331,58 @@ elif test == '5':
         comp.files = comp.files[:5]
         comp.splitFactor = 1
         comp.fineSplitFactor = 5
-elif test == '6':
-    # test data
-    comp = DoubleElectronAB; comp.name = "dataSamplesAll"
-    comp.triggers = []
-    jetAna.recalibrateJets = False 
-    jetAna.smearJets       = False 
-    comp.files = [ '/afs/cern.ch/work/e/emanuele/monox/heppy/CMSSW_7_2_3_patch1/src/step5.root' ]
-    comp.isMC = False
-    comp.splitFactor = 1
-    comp.fineSplitFactor = 1
-    monoJetSkim.metCut = 0
-    selectedComponents = [ comp ]
 elif test == 'synch-74X': # sync
-    from CMGTools.MonoXAnalysis.samples.samples_monojet_13TeV_74X import *
     #eventSelector.toSelect = [ 11809 ]
     #sequence = cfg.Sequence([eventSelector] + dmCoreSequence+[ ttHEventAna, treeProducer, ])
     monoJetCtrlLepSkim.minLeptons = 0
     monoJetSkim.metCut = 0  
     what = getHeppyOption("sample")
-    if what == "ADD":
-        comp = ADD_MJ
-        comp.files = [ 'root://eoscms//eos/cms/store/relval/CMSSW_7_4_1/RelValADDMonoJet_d3MD3_13/MINIAODSIM/MCRUN2_74_V9_gensim71X-v1/00000/80CF5456-B9EC-E411-93DA-002618FDA248.root' ]
+    if what == "TTbarDM":
+        comp = kreator.makeMCComponent("TTbarDM","/TTbarDMJets_pseudoscalar_Mchi-1_Mphi-100_TuneCUETP8M1_13TeV-madgraphMLM-pythia8/RunIISpring15MiniAODv2-74X_mcRun2_asymptotic_v2-v1/MINIAODSIM", "CMS", ".*root", 1.0, useAAA=True)
+        selectedComponents = [ comp ]
+    elif what == "DMS":
+        comp = DMS_Mchi_100_gSM_1p0_gDM_1p0
+        comp.files = [ 'root://eoscms//eos/cms/store/mc/RunIISpring15MiniAODv2/DMS_NNPDF30_Scalar_Mphi-300_Mchi-100_gSM-1p0_gDM-1p0_13TeV-powheg/MINIAODSIM/74X_mcRun2_asymptotic_v2-v1/10000/6872703C-7972-E511-8228-0CC47A009E26.root' ]
         selectedComponents = [ comp ]
     elif what == "TTLep":
-        comp = TTLep
-        comp.files = [ 'root://eoscms//eos/cms/store/relval/CMSSW_7_4_1/RelValProdTTbar_13/MINIAODSIM/MCRUN2_74_V9_gensim71X-v1/00000/0A9E2CED-C9EC-E411-A8E4-003048FFCBA8.root' ]
+        comp = TTLep_pow
+        comp.files = [ 'root://eoscms//eos/cms/store/mc/RunIISpring15MiniAODv2/TTTo2L2Nu_13TeV-powheg/MINIAODSIM/74X_mcRun2_asymptotic_v2-v1/60000/F8910E89-C56D-E511-BD90-003048F35244.root' ]
         selectedComponents = [ comp ]
     elif what == "DYJets":
-        comp = DYJetsToLL_M50_50ns
-        comp.files = [ 'root://eoscms//eos/cms/store/mc/RunIISpring15DR74/DYJetsToLL_M-50_TuneCUETP8M1_13TeV-amcatnloFXFX-pythia8/MINIAODSIM/Asympt50ns_MCRUN2_74_V9A-v2/60000/04963444-D107-E511-B245-02163E00F339.root' ]
-        jetAna.mcGT = "MCRUN2_74_V9A"
+        comp = DYJetsToLL_M50
+        comp.files = [ 'root://eoscms//eos/cms/store/mc/RunIISpring15MiniAODv2/DYJetsToLL_M-50_TuneCUETP8M1_13TeV-amcatnloFXFX-pythia8/MINIAODSIM/74X_mcRun2_asymptotic_v2-v1/50000/00759690-D16E-E511-B29E-00261894382D.root' ]
         selectedComponents = [ comp ]
-    elif what == "TTbar":
-        comp = TTbar
-        comp.files = [ 'root://eoscms//eos/cms/store/relval/CMSSW_7_4_1/RelValProdTTbar_13/MINIAODSIM/MCRUN2_74_V9_gensim71X-v1/00000/0A9E2CED-C9EC-E411-A8E4-003048FFCBA8.root' ]
+    elif what == "TTJets":
+        comp = TJets_LO
+        comp.files = [ 'root://eoscms//eos/cms/store/mc/RunIISpring15MiniAODv2/TTJets_TuneCUETP8M1_13TeV-madgraphMLM-pythia8/MINIAODSIM/74X_mcRun2_asymptotic_v2-v1/30000/001F4F14-786E-E511-804F-0025905A60FE.root' ]
         selectedComponents = [ comp ]
     elif what == "WJets":
-        comp = WJetsToLNu_HT400to600
-        comp.files = [ 'root://eoscms//eos/cms/store/mc/RunIISpring15DR74/WJetsToLNu_HT-400To600_TuneCUETP8M1_13TeV-madgraphMLM-pythia8/MINIAODSIM/Asympt25ns_MCRUN2_74_V9-v3/00000/6408230F-9F08-E511-A1A6-D4AE526A023A.root' ]
-        selectedComponents = [ comp ]
-    elif what == "RSGrav":
-        comp = RSGravGaGa
-        comp.files = [ 'root://eoscms//eos/cms/store/relval/CMSSW_7_4_1/RelValRSGravitonToGaGa_13TeV/MINIAODSIM/MCRUN2_74_V9_gensim71X-v1/00000/189277BA-DCEC-E411-B3B8-0025905B859E.root' ]
+        comp = WJetsToLNu_HT100to200
+        comp.files = [ 'root://eoscms//eos/cms/store/mc/RunIISpring15MiniAODv2/WJetsToLNu_HT-100To200_TuneCUETP8M1_13TeV-madgraphMLM-pythia8/MINIAODSIM/74X_mcRun2_asymptotic_v2-v1/10000/003F1529-D36D-E511-9E33-001E6724816F.root' ]
         selectedComponents = [ comp ]
     else:
-        selectedComponents = RelVals741
-    jetAna.recalibrateJets = True
+        selectedComponents = mcSamples_monojet_Asymptotic25ns
     jetAna.smearJets       = False
     for comp in selectedComponents:
         comp.splitFactor = 1
-        comp.fineSplitFactor = 10
-elif test == 'SR':
-    selectedComponents = backgroundSamples + signalSamples
-    #selectedComponents = backgroundSamples
-    monoJetSkim.metCut = 200
-    monoJetCtrlLepSkim.minLeptons = 0
-    for comp in selectedComponents:
-        comp.splitFactor = 350
-elif test == '74X-MC':
-    from CMGTools.MonoXAnalysis.samples.samples_monojet_13TeV_74X import *
-    what = getHeppyOption("sample")
-    if what == "TT":
-        monoJetCtrlLepSkim.minLeptons = 0
-        selectedComponents = TTJets_LO_50ns
-    elif what == "Z":
-        monoJetCtrlLepSkim.minLeptons = 0
-        monoJetSkim.metCut = 0
-        selectedComponents = [ DYJetsToLL_M50_50ns ]
-    elif what == "WJets":
-        monoJetSkim.metCut = 0
-        selectedComponents = [ WJetsToLNu_50ns ]
-    else:
-        selectedComponents = RelVals740
-    if not getHeppyOption("all"):
-        for comp in selectedComponents:
-            comp.files = comp.files[:1]
-            comp.splitFactor = 1
-            comp.fineSplitFactor = 1 if getHeppyOption("single") else 4
+        comp.fineSplitFactor = 1 if getHeppyOption("single") else 2
 elif test == '74X-Data':
-    from CMGTools.MonoXAnalysis.samples.samples_monojet_13TeV_74X import *
-    from CMGTools.MonoXAnalysis.samples.samples_8TeVReReco_74X import *
     what = getHeppyOption("sample")
-    if what == "JetHT":
-        monoJetSkim.metCut = 0
-        selectedComponents = [ JetHT_742 ]
-    elif what == "Z":
+    if what == "DoubleEG":
+        comp = DoubleEG_Run2015D_05Oct
+        comp.files = [ 'root://eoscms//eos/cms/store/data/Run2015D/DoubleEG/MINIAOD/05Oct2015-v1/50000/0014E86F-656F-E511-9D3F-002618943831.root' ]
+        selectedComponents = [ comp ]
         monoJetCtrlLepSkim.minLeptons = 2
-        monoJetSkim.metCut = 0
-        selectedComponents = [ SingleMuZ_742, DoubleElectronZ_742 ]
-    elif what == "MuEG":
-        selectedComponents = [ MuEG_742 ]
-    elif what == "EGamma":
-        selectedComponents = [ privEGamma2015A ]
-        lepAna.loose_electron_id = ""
-        lepAna.loose_electron_relIso = 1000.
-        photonAna.gammaID = "POG_PHYS14_25ns_Loose_NoIso"
-        monoJetCtrlLepSkim.minLeptons = 1
-        monoJetSkim.metCut = 0
-    elif what == "DoubleEG":
-        selectedComponents = [ DoubleEG_Run2015B ]
+    elif what == "DoubleMuon":
+        comp = DoubleMuon_Run2015D_05Oct
+        comp.files = [ 'root://eoscms//eos/cms/store/data/Run2015D/DoubleMuon/MINIAOD/05Oct2015-v1/30000/04008DF6-8A6F-E511-B034-0025905A6136.root' ]
+        selectedComponents = [ comp ]
         monoJetCtrlLepSkim.minLeptons = 2
     else:
-        selectedComponents = dataSamples742
+        selectedComponents = dataSamples_Run2015D_05Oct
     for comp in selectedComponents:
         comp.splitFactor = 1
-        comp.fineSplitFactor = 1 if getHeppyOption("single") else 6
+        comp.fineSplitFactor = 1 if getHeppyOption("single") else 4
         if not getHeppyOption("all"):
             comp.files = comp.files[:1]
 
@@ -403,7 +402,8 @@ outputService.append(output_service)
 from PhysicsTools.HeppyCore.framework.eventsfwlite import Events
 from CMGTools.TTHAnalysis.tools.EOSEventsWithDownload import EOSEventsWithDownload
 event_class = EOSEventsWithDownload
-if getHeppyOption("nofetch"):
+EOSEventsWithDownload.aggressive = 2 # always fetch if running on Wigner
+if getHeppyOption("nofetch")  or getHeppyOption("isCrab"):
     event_class = Events
 config = cfg.Config( components = selectedComponents,
                      sequence = sequence,
