@@ -20,7 +20,7 @@ class LeptonFakeRateQCDVars:
             ret["LepGood_CorrConePt"] = [-99.0] * event.nLepGood
         for il,lep in enumerate(leps):
             if not self.leptonSel(lep): continue
-            ret["LepGood_CorrConePt"][il] = conept(lep.pt,lep.miniRelIso,lep.jetPtRatio,lep.jetPtRel,lep.pdgId,2)
+            ret["LepGood_CorrConePt"][il] = conept(lep.pt,lep.miniRelIso,lep.jetPtRatiov2,lep.jetPtRelv2,lep.pdgId,2)
 #            print ret["LepGood_CorrConePt"][il]/lep.pt,lep.miniRelIso,lep.jetPtRatio,lep.jetPtRel,lep.pdgId
             jets = [ j for j in jetsc if self.jetSel(j,lep,deltaR(j,lep)) ]
             if len(jets) == 0: continue 
